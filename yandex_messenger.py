@@ -85,10 +85,14 @@ class YandexMessenger:
         first_issue_url: str,
         first_created_at: datetime,
         detected_at: datetime,
+        window_minutes=None,
+        queue_title: str = None,
     ) -> bool:
-        window = os.getenv("WINDOW_MINUTES", "30")
+        window = window_minutes if window_minutes is not None else os.getenv("WINDOW_MINUTES", "30")
+        queue_line = f"📂 Очередь: {queue_title}\n" if queue_title else ""
         message = (
             "⚠️ ОБНАРУЖЕНО ПОВТОРЕНИЕ КАТЕГОРИИ\n\n"
+            f"{queue_line}"
             f"📌 Категория: {category}\n"
             f"🏷 Тег: {tag or 'Не указан'}\n\n"
             f"🆕 Новая задача: {new_issue_key}\n"

@@ -83,8 +83,10 @@
 <body>
 <header>
   <h1>Sentry</h1>
+  <select id="queue" class="toolbtn" title="Очередь"><option value="all">Все очереди</option></select>
   <div class="rangebtns" id="ranges"></div>
   <div class="spacer"></div>
+  <a class="toolbtn" href="/admin" style="text-decoration:none">Админка</a>
   <label class="auto"><input type="checkbox" id="auto"> авто</label>
   <button class="toolbtn" id="refresh">Обновить</button>
   <span class="meta" id="updated"></span>
@@ -126,7 +128,7 @@
 <script>
 "use strict";
 const RANGES = [7, 30, 90, 365];
-let state = { days: 30, auto: false, timer: null };
+let state = { days: 30, queue: "all", auto: false, timer: null, queuesLoaded: false };
 
 const $ = (id) => document.getElementById(id);
 const fmtInt = (n) => (n == null ? "—" : Math.round(n).toLocaleString("ru-RU"));
@@ -321,6 +323,18 @@ function render(data) {
 
   renderSpikeList(data.recent_spikes, data.tracker_url);
 
+  if (!state.queuesLoaded && Array.isArray(data.queues)) {
+    const sel = $("queue");
+    data.queues.forEach(q => {
+      const o = document.createElement("option");
+      o.value = q.key;
+      o.textContent = (q.title || q.key) + (q.enabled ? "" : " (выкл.)");
+      sel.appendChild(o);
+    });
+    sel.value = state.queue;
+    state.queuesLoaded = true;
+  }
+
   const t = new Date();
   $("updated").textContent = "обновлено " + t.toLocaleTimeString("ru-RU");
 }
@@ -349,7 +363,8 @@ function fmtTs(epoch) {
 
 async function load() {
   try {
-    const r = await fetch(`/api/v1/analytics/overview?days=${state.days}`, { headers: { "Accept": "application/json" } });
+    const q = encodeURIComponent(state.queue || "all");
+    const r = await fetch(`/api/v1/analytics/overview?days=${state.days}&queue=${q}`, { headers: { "Accept": "application/json" } });
     if (!r.ok) throw new Error("HTTP " + r.status);
     render(await r.json());
   } catch (e) {
@@ -358,6 +373,7 @@ async function load() {
 }
 
 $("refresh").onclick = load;
+$("queue").onchange = (e) => { state.queue = e.target.value; load(); };
 $("auto").onchange = (e) => {
   state.auto = e.target.checked;
   if (state.timer) { clearInterval(state.timer); state.timer = null; }

@@ -10,7 +10,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Код приложения
-COPY app.py yandex_messenger.py db_inspect.py dashboard.html ./
+COPY app.py yandex_messenger.py db_inspect.py logging_setup.py config_store.py admin.py \
+     dashboard.html admin.html ./
 
 # Непривилегированный пользователь + каталог под SQLite-файл (монтируется томом)
 RUN useradd --create-home --uid 1000 appuser \
