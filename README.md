@@ -64,7 +64,11 @@ Swagger UI: `http://<host>:8000/docs`
   "issue_key": "{{issue.key}}",
   "summary": "{{issue.summary}}",
   "category": "{{issue.category}}",
+<<<<<<< HEAD
   "tag": "{{issue.tags}}"
+=======
+  "tag": "tags"
+>>>>>>> 481caa11bad6b056dd387fd56b3f0eea170829cc
 }
 ```
 
