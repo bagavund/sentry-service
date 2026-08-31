@@ -1,0 +1,30 @@
+services:
+  sentry:
+    build: .
+    # локальный тег не 'sentry:latest', чтобы не путать с публичным образом getsentry
+    image: sentry-fl:latest
+    container_name: sentry
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # SQLite-файл с состоянием переживает пересборку/перезапуск контейнера
+      - sentry-data:/app/data
+    ports:
+      # Порт на хосте берётся из .env (PORT), внутри контейнера всегда 8000.
+      # Для доступа только с локальной машины поменяйте на "127.0.0.1:${PORT:-8000}:8000".
+      - "${PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  sentry-data:

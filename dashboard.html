@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentry — дашборд</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1c1e21;
+    --muted: #6b7280;
+    --line: #e4e7eb;
+    --accent: #2f6feb;
+    --accent-soft: #bcd0fb;
+    --spike: #e0603a;
+    --spike-soft: #f2c3b4;
+    --grid: #eef0f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c;
+      --card: #1e2127;
+      --ink: #e7e9ec;
+      --muted: #9aa1ab;
+      --line: #2c313a;
+      --accent: #5c8bf5;
+      --accent-soft: #2f425f;
+      --spike: #e8794f;
+      --spike-soft: #4a2f24;
+      --grid: #262a31;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  header {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+    padding: 16px 20px; border-bottom: 1px solid var(--line); background: var(--card);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 650; }
+  header .spacer { flex: 1; }
+  .rangebtns { display: flex; gap: 4px; }
+  .rangebtns button, .toolbtn {
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+    padding: 5px 11px; border-radius: 7px; cursor: pointer; font-size: 13px;
+  }
+  .rangebtns button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .meta { color: var(--muted); font-size: 12px; }
+  label.auto { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; cursor: pointer; }
+  main { padding: 20px; max-width: 1180px; margin: 0 auto; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .kpi .v { font-size: 24px; font-weight: 680; letter-spacing: -0.01em; }
+  .kpi .l { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow: hidden; }
+  .card.wide { grid-column: 1 / -1; }
+  .card h2 { font-size: 13px; margin: 0 0 12px; font-weight: 620; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .bar-label { fill: var(--muted); font-size: 11px; }
+  .axis { stroke: var(--line); }
+  .gridline { stroke: var(--grid); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .hm { display: grid; grid-template-columns: 34px repeat(24, 1fr); gap: 2px; }
+  .hm div { font-size: 10px; color: var(--muted); text-align: center; line-height: 16px; }
+  .hm .cell { border-radius: 2px; height: 16px; }
+  .empty { color: var(--muted); padding: 24px 0; text-align: center; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sentry</h1>
+  <div class="rangebtns" id="ranges"></div>
+  <div class="spacer"></div>
+  <label class="auto"><input type="checkbox" id="auto"> авто</label>
+  <button class="toolbtn" id="refresh">Обновить</button>
+  <span class="meta" id="updated"></span>
+</header>
+<main>
+  <div class="kpis" id="kpis"></div>
+  <div class="grid">
+    <div class="card wide">
+      <h2>Поток задач по времени</h2>
+      <div id="intake"></div>
+      <div class="legend">
+        <span><i style="background:var(--accent-soft)"></i>обычные</span>
+        <span><i style="background:var(--spike)"></i>во время всплеска</span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Топ категорий</h2>
+      <div id="categories"></div>
+    </div>
+    <div class="card">
+      <h2>Каналы</h2>
+      <div id="channels"></div>
+    </div>
+    <div class="card wide">
+      <h2>Всплески по времени (число инцидентов)</h2>
+      <div id="spikes"></div>
+    </div>
+    <div class="card wide">
+      <h2>Когда приходят задачи — час × день недели</h2>
+      <div id="heatmap"></div>
+    </div>
+    <div class="card wide">
+      <h2>Последние всплески</h2>
+      <div id="spikelist"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+"use strict";
+const RANGES = [7, 30, 90, 365];
+let state = { days: 30, auto: false, timer: null };
+
+const $ = (id) => document.getElementById(id);
+const fmtInt = (n) => (n == null ? "—" : Math.round(n).toLocaleString("ru-RU"));
+const fmtPct = (x) => (x == null ? "—" : (x * 100).toFixed(1) + "%");
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function buildRanges() {
+  const box = $("ranges");
+  box.innerHTML = "";
+  RANGES.forEach(d => {
+    const b = document.createElement("button");
+    b.textContent = d + " дн";
+    b.className = d === state.days ? "active" : "";
+    b.onclick = () => { state.days = d; buildRanges(); load(); };
+    box.appendChild(b);
+  });
+}
+
+// ---- SVG helpers -----------------------------------------------------------
+const SVGNS = "http://www.w3.org/2000/svg";
+function el(name, attrs, parent) {
+  const n = document.createElementNS(SVGNS, name);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(n);
+  return n;
+}
+function newSvg(container, w, h) {
+  container.innerHTML = "";
+  const s = el("svg", { viewBox: `0 0 ${w} ${h}`, preserveAspectRatio: "xMidYMid meet" }, container);
+  return s;
+}
+
+// Stacked vertical bars. series: [{label, parts:[{value,color}]}]
+function stackedBars(container, series, opts) {
+  opts = opts || {};
+  const W = 900, H = opts.height || 240, padL = 40, padB = 26, padT = 10, padR = 6;
+  const svg = newSvg(container, W, H);
+  if (!series.length) { container.innerHTML = '<div class="empty">нет данных за период</div>'; return; }
+  const totals = series.map(s => s.parts.reduce((a, p) => a + p.value, 0));
+  const max = Math.max(1, ...totals);
+  const plotW = W - padL - padR, plotH = H - padB - padT;
+  const bw = plotW / series.length;
+  // y gridlines
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i++) {
+    const y = padT + plotH * (1 - i / ticks);
+    el("line", { x1: padL, y1: y, x2: W - padR, y2: y, class: "gridline" }, svg);
+    el("text", { x: padL - 6, y: y + 3, "text-anchor": "end", class: "bar-label" }, svg)
+      .textContent = fmtInt(max * i / ticks);
+  }
+  series.forEach((s, idx) => {
+    let acc = 0;
+    const x = padL + idx * bw;
+    s.parts.forEach(p => {
+      if (p.value <= 0) return;
+      const hh = plotH * (p.value / max);
+      const y = padT + plotH * (1 - (acc + p.value) / max);
+      const r = el("rect", { x: x + bw * 0.12, y: y, width: bw * 0.76, height: hh, fill: p.color, rx: 1 }, svg);
+      el("title", {}, r).textContent = `${s.label}: ${fmtInt(p.value)}`;
+      acc += p.value;
+    });
+  });
+  // x labels — thin out
+  const step = Math.ceil(series.length / 12);
+  series.forEach((s, idx) => {
+    if (idx % step !== 0) return;
+    el("text", { x: padL + idx * bw + bw / 2, y: H - padB + 14, "text-anchor": "middle", class: "bar-label" }, svg)
+      .textContent = shortDate(s.label);
+  });
+}
+
+function shortDate(label) {
+  // "2026-08-31" or "2026-08-31T14:00"
+  const m = label.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):00)?$/);
+  if (!m) return label;
+  return m[4] != null ? `${m[3]}.${m[2]} ${m[4]}:00` : `${m[3]}.${m[2]}`;
+}
+
+// Horizontal stacked bars. rows: [{label, parts:[{value,color}], total}]
+function hBars(container, rows) {
+  if (!rows.length) { container.innerHTML = '<div class="empty">нет данных за период</div>'; return; }
+  const W = 900, rowH = 26, padL = 4, padR = 60, labelW = 190;
+  const H = rows.length * rowH + 6;
+  const svg = newSvg(container, W, H);
+  const max = Math.max(1, ...rows.map(r => r.parts.reduce((a, p) => a + p.value, 0)));
+  const plotW = W - labelW - padL - padR;
+  rows.forEach((r, i) => {
+    const y = i * rowH + 3;
+    el("text", { x: padL, y: y + rowH / 2 + 4, class: "bar-label" }, svg).textContent = clip(r.label, 26);
+    let acc = 0;
+    r.parts.forEach(p => {
+      const w = plotW * (p.value / max);
+      if (w > 0) {
+        const rect = el("rect", { x: labelW + acc, y: y + 3, width: w, height: rowH - 10, fill: p.color, rx: 2 }, svg);
+        el("title", {}, rect).textContent = `${r.label}: ${fmtInt(p.value)}`;
+      }
+      acc += w;
+    });
+    const tot = r.parts.reduce((a, p) => a + p.value, 0);
+    el("text", { x: labelW + acc + 6, y: y + rowH / 2 + 4, class: "bar-label" }, svg).textContent = fmtInt(tot);
+  });
+}
+const clip = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + "…" : s);
+
+// Heatmap 7x24, Monday first
+const DOW = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+function heatmap(container, grid) {
+  // grid indexed [0=Sun..6=Sat][hour]; reorder to Mon-first
+  const order = [1, 2, 3, 4, 5, 6, 0];
+  const max = Math.max(1, ...grid.flat());
+  const box = document.createElement("div");
+  box.className = "hm";
+  const corner = document.createElement("div"); box.appendChild(corner);
+  for (let h = 0; h < 24; h++) {
+    const c = document.createElement("div");
+    c.textContent = h % 3 === 0 ? h : "";
+    box.appendChild(c);
+  }
+  order.forEach(d => {
+    const lab = document.createElement("div"); lab.textContent = DOW[order.indexOf(d)]; box.appendChild(lab);
+    for (let h = 0; h < 24; h++) {
+      const v = grid[d][h] || 0;
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      const t = v / max;
+      cell.style.background = v === 0 ? "var(--grid)" : mix(t);
+      cell.title = `${DOW[order.indexOf(d)]} ${h}:00 — ${v}`;
+      box.appendChild(cell);
+    }
+  });
+  container.innerHTML = "";
+  container.appendChild(box);
+}
+function mix(t) {
+  // light -> accent
+  const a = [188, 208, 251], b = [47, 111, 235];
+  const c = a.map((x, i) => Math.round(x + (b[i] - x) * Math.min(1, 0.25 + t * 0.75)));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+
+// ---- render ---------------------------------------------------------------
+function renderKpis(sum, days) {
+  const perDay = days ? sum.total_tasks / days : 0;
+  const items = [
+    ["Всего задач", fmtInt(sum.total_tasks)],
+    ["Задач в сутки", perDay.toFixed(1)],
+    ["Инцидентов", fmtInt(sum.spike_incidents)],
+    ["Задач во всплесках", fmtInt(sum.spike_tasks)],
+    ["Доля во всплесках", fmtPct(sum.spike_share)],
+    ["Средний размер всплеска", sum.avg_spike_size ? sum.avg_spike_size.toFixed(1) : "—"],
+  ];
+  $("kpis").innerHTML = items.map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+}
+
+function render(data) {
+  const cs = getComputedStyle(document.documentElement);
+  const cNorm = cs.getPropertyValue("--accent-soft").trim();
+  const cSpike = cs.getPropertyValue("--spike").trim();
+
+  renderKpis(data.summary, data.range.days);
+
+  stackedBars($("intake"), data.intake.map(r => ({
+    label: r.bucket,
+    parts: [
+      { value: Math.max(0, r.tasks - r.spike_tasks), color: cNorm },
+      { value: r.spike_tasks, color: cSpike },
+    ],
+  })));
+
+  stackedBars($("spikes"), data.spikes.map(r => ({
+    label: r.bucket,
+    parts: [{ value: r.incidents, color: cSpike }],
+  })), { height: 180 });
+
+  hBars($("categories"), data.categories.map(c => ({
+    label: c.category,
+    parts: [
+      { value: Math.max(0, c.tasks - c.spike_tasks), color: cNorm },
+      { value: c.spike_tasks, color: cSpike },
+    ],
+  })));
+
+  hBars($("channels"), data.channels.map(c => ({
+    label: c.channel,
+    parts: [
+      { value: Math.max(0, c.tasks - c.spike_tasks), color: cNorm },
+      { value: c.spike_tasks, color: cSpike },
+    ],
+  })));
+
+  heatmap($("heatmap"), data.heatmap);
+
+  renderSpikeList(data.recent_spikes, data.tracker_url);
+
+  const t = new Date();
+  $("updated").textContent = "обновлено " + t.toLocaleTimeString("ru-RU");
+}
+
+function renderSpikeList(rows, trackerUrl) {
+  if (!rows.length) { $("spikelist").innerHTML = '<div class="empty">всплесков за период не было</div>'; return; }
+  const body = rows.map(r => {
+    const link = `<a href="${esc(trackerUrl)}/${esc(r.first_issue_key)}" target="_blank" rel="noopener">${esc(r.first_issue_key)}</a>`;
+    return `<tr>
+      <td>${fmtTs(r.started)}</td>
+      <td>${link}</td>
+      <td>${esc(r.category)}</td>
+      <td>${esc(r.tag || "—")}</td>
+      <td class="num">${fmtInt(r.size)}</td>
+    </tr>`;
+  }).join("");
+  $("spikelist").innerHTML =
+    `<div style="overflow-x:auto"><table><thead><tr>
+      <th>Начало</th><th>Первая задача</th><th>Категория</th><th>Канал</th><th class="num">Размер</th>
+    </tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function fmtTs(epoch) {
+  const d = new Date(epoch * 1000);
+  return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+async function load() {
+  try {
+    const r = await fetch(`/api/v1/analytics/overview?days=${state.days}`, { headers: { "Accept": "application/json" } });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    render(await r.json());
+  } catch (e) {
+    $("updated").textContent = "ошибка загрузки: " + e.message;
+  }
+}
+
+$("refresh").onclick = load;
+$("auto").onchange = (e) => {
+  state.auto = e.target.checked;
+  if (state.timer) { clearInterval(state.timer); state.timer = null; }
+  if (state.auto) state.timer = setInterval(load, 30000);
+};
+
+buildRanges();
+load();
+</script>
+</body>
+</html>

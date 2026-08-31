@@ -1,0 +1,15 @@
+.env
+.env.local
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.idea/
+.vscode/
+
+# Локальная БД
+data/
+*.db
+*.db-wal
+*.db-shm
