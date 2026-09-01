@@ -16,3 +16,6 @@ Dockerfile
 docker-compose.yml
 .dockerignore
 Makefile
+tests/
+pytest.ini
+requirements-dev.txt

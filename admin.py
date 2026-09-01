@@ -47,6 +47,7 @@ class QueueBody(BaseModel):
     messenger_token: Optional[str] = None
     window_minutes: Optional[int] = None
     threshold: Optional[int] = None
+    alert_cooldown_minutes: Optional[int] = None
     channels: Optional[str] = None
     webhook_token: Optional[str] = None
     enabled: Optional[bool] = None
@@ -152,6 +153,7 @@ def build_admin_router(config, storage, checker, admin_html_getter):
             "messenger_token_set": bool(q["messenger_token"]),
             "window_minutes": q["window_minutes"],
             "threshold": q["threshold"],
+            "alert_cooldown_minutes": q["alert_cooldown_minutes"],
             "channels": ", ".join(q["channels"]),
             "webhook_token_set": bool(q["webhook_token"]),
             "webhook_token": q["webhook_token"],  # нужен оператору для настройки триггера
@@ -260,7 +262,7 @@ def _queue_fields(body: QueueBody) -> dict:
     """Только реально присланные поля (None пропускаем — не затираем)."""
     out = {}
     for name in ("title", "chat_id", "messenger_token", "window_minutes",
-                 "threshold", "channels", "webhook_token", "enabled"):
+                 "threshold", "alert_cooldown_minutes", "channels", "webhook_token", "enabled"):
         val = getattr(body, name)
         if val is not None:
             out[name] = val

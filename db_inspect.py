@@ -36,7 +36,7 @@ def main():
 
     print(f"БД: {DB_PATH}\n")
 
-    for t in ("settings", "queues", "seen", "tasks", "incoming_log", "duplicate_log", "events"):
+    for t in ("settings", "queues", "seen", "tasks", "incoming_log", "duplicate_log", "events", "alert_state"):
         try:
             n = db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
         except sqlite3.OperationalError:
@@ -46,7 +46,7 @@ def main():
         rows = db.execute(f"SELECT * FROM {t} ORDER BY rowid DESC LIMIT 20").fetchall()
         for r in rows:
             d = dict(r)
-            for k in ("expires_at", "created_at", "ts", "updated_at"):
+            for k in ("expires_at", "created_at", "ts", "updated_at", "alerted_at"):
                 if k in d:
                     d[k] = ts(d[k])
             if "data" in d:

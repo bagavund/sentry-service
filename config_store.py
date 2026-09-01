@@ -37,6 +37,7 @@ EDITABLE_KEYS = [
     "default_queue_key",
     "log_level",
     "admin_password",
+    "alert_cooldown_minutes",
 ]
 
 
@@ -56,6 +57,7 @@ class ConfigStore:
             # значения по умолчанию для формы «новая очередь»
             "window_minutes": os.getenv("WINDOW_MINUTES", "30"),
             "threshold": os.getenv("ALERT_THRESHOLD", "1"),
+            "alert_cooldown_minutes": os.getenv("ALERT_COOLDOWN_MINUTES", "0"),
         }
 
         path = db_path or os.getenv("DB_PATH", "data/sentry.db")
@@ -91,11 +93,23 @@ class ConfigStore:
                     channels        TEXT NOT NULL DEFAULT '',
                     webhook_token   TEXT NOT NULL DEFAULT '',
                     enabled         INTEGER NOT NULL DEFAULT 1,
+                    alert_cooldown_minutes INTEGER NOT NULL DEFAULT 0,
                     created_at      REAL NOT NULL,
                     updated_at      REAL NOT NULL
                 );
             """)
             self._db.commit()
+        self._migrate()
+
+    def _migrate(self):
+        """Лёгкие миграции существующих БД (ALTER не идемпотентен — проверяем колонки)."""
+        with self._lock:
+            cols = {r["name"] for r in self._db.execute("PRAGMA table_info(queues)")}
+            if "alert_cooldown_minutes" not in cols:
+                self._db.execute(
+                    "ALTER TABLE queues ADD COLUMN alert_cooldown_minutes INTEGER NOT NULL DEFAULT 0"
+                )
+                self._db.commit()
 
     def _reload(self):
         with self._lock:
@@ -167,6 +181,7 @@ class ConfigStore:
             "messenger_token": r["messenger_token"],
             "window_minutes": int(r["window_minutes"]),
             "threshold": int(r["threshold"]),
+            "alert_cooldown_minutes": int(r["alert_cooldown_minutes"]),
             "channels": [c.strip() for c in r["channels"].split(",") if c.strip()],
             "webhook_token": r["webhook_token"],
             "enabled": bool(r["enabled"]),
@@ -193,6 +208,7 @@ class ConfigStore:
             "title": "", "chat_id": "", "messenger_token": "",
             "window_minutes": self.get_int("window_minutes") or 30,
             "threshold": self.get_int("threshold") or 1,
+            "alert_cooldown_minutes": max(0, self.get_int("alert_cooldown_minutes")),
             "channels": [], "webhook_token": "", "enabled": True,
         }
 
@@ -212,20 +228,23 @@ class ConfigStore:
             channels,
             str(pick("webhook_token", base["webhook_token"])).strip(),
             1 if pick("enabled", base["enabled"]) else 0,
+            max(0, int(pick("alert_cooldown_minutes", base["alert_cooldown_minutes"]))),
         )
         now = time.time()
         with self._lock:
             if existing:
                 self._db.execute(
                     "UPDATE queues SET title=?, chat_id=?, messenger_token=?, window_minutes=?, "
-                    "threshold=?, channels=?, webhook_token=?, enabled=?, updated_at=? WHERE key=?",
+                    "threshold=?, channels=?, webhook_token=?, enabled=?, alert_cooldown_minutes=?, "
+                    "updated_at=? WHERE key=?",
                     (*row, now, key),
                 )
             else:
                 self._db.execute(
                     "INSERT INTO queues (key, title, chat_id, messenger_token, window_minutes, "
-                    "threshold, channels, webhook_token, enabled, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "threshold, channels, webhook_token, enabled, alert_cooldown_minutes, "
+                    "created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (key, *row, now, now),
                 )
             self._db.commit()

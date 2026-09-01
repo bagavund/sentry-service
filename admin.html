@@ -242,6 +242,7 @@ async function loadQueues() {
       <div class="meta">
         <span>окно: <b>${q.window_minutes} мин</b></span>
         <span>порог: <b>${q.threshold}</b> (алерт с ${q.threshold + 1}-й задачи)</span>
+        <span>кулдаун: <b>${q.alert_cooldown_minutes ? q.alert_cooldown_minutes + " мин" : "выкл"}</b></span>
         <span>каналы: ${esc(q.channels || "—")}</span>
       </div>
       <div class="meta">
@@ -278,7 +279,7 @@ async function loadQueues() {
 
 function queueForm(q) {
   const isNew = !q;
-  q = q || { window_minutes: 30, threshold: 1, enabled: true, channels: "", chat_id: "", title: "" };
+  q = q || { window_minutes: 30, threshold: 1, alert_cooldown_minutes: 0, enabled: true, channels: "", chat_id: "", title: "" };
   openModal(isNew ? "Новая очередь" : `Очередь «${q.key}»`, `
     <form class="grid" id="qform">
       ${isNew ? `<label>Ключ *</label><div><input type="text" name="key" placeholder="SUPPORT" required>
@@ -290,6 +291,8 @@ function queueForm(q) {
       <label>Окно поиска, мин</label><input type="number" name="window_minutes" min="1" value="${q.window_minutes}">
       <label>Порог дублей</label><div><input type="number" name="threshold" min="1" value="${q.threshold}">
         <div class="hint">Сколько совпадений в окне до алерта. 1 = сообщение приходит со 2-й задачи.</div></div>
+      <label>Кулдаун алертов, мин</label><div><input type="number" name="alert_cooldown_minutes" min="0" value="${q.alert_cooldown_minutes || 0}">
+        <div class="hint">Не слать повторный алерт по той же категории+тегу чаще, чем раз в N минут. 0 = без кулдауна (сообщение на каждую задачу всплеска).</div></div>
       <label>Каналы (теги)</label><input type="text" name="channels" value="${esc(q.channels || "")}" placeholder="Сайт, МП">
       <label>Токен вебхука</label><div><input type="text" name="webhook_token" placeholder="${q.webhook_token_set ? "задан (пустым — не менять)" : "пусто = общий токен"}">
         <div class="hint">Отдельный токен только для этой очереди. Пусто — используется общий.</div></div>
@@ -309,6 +312,7 @@ function queueForm(q) {
       messenger_token: f.messenger_token.value,
       window_minutes: Number(f.window_minutes.value),
       threshold: Number(f.threshold.value),
+      alert_cooldown_minutes: Number(f.alert_cooldown_minutes.value),
       channels: f.channels.value,
       webhook_token: f.webhook_token.value,
       enabled: f.enabled.checked,
@@ -367,6 +371,7 @@ const LABELS = {
   default_queue_key: "Очередь по умолчанию (ключ)",
   log_level: "Уровень логирования",
   admin_password: "Пароль админки",
+  alert_cooldown_minutes: "Кулдаун алертов по умолчанию, мин (0 = выкл)",
 };
 const SECRET = new Set(["messenger_token", "webhook_token", "admin_password"]);
 

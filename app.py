@@ -158,6 +158,13 @@ class SQLiteStorage:
                 );
                 CREATE INDEX IF NOT EXISTS idx_events_ts  ON events (ts);
                 CREATE INDEX IF NOT EXISTS idx_events_cat ON events (category, ts);
+                CREATE TABLE IF NOT EXISTS alert_state (
+                    queue_key  TEXT NOT NULL,
+                    category   TEXT NOT NULL,
+                    tag        TEXT NOT NULL DEFAULT '',
+                    alerted_at REAL NOT NULL,
+                    PRIMARY KEY (queue_key, category, tag)
+                );
             """)
             self._db.commit()
             self._migrate()
@@ -192,6 +199,7 @@ class SQLiteStorage:
         max_window = self.config.max_window_minutes() * 60
         self._db.execute("DELETE FROM seen WHERE expires_at <= ?", (now,))
         self._db.execute("DELETE FROM tasks WHERE created_at <= ?", (now - max_window,))
+        self._db.execute("DELETE FROM alert_state WHERE alerted_at < ?", (now - 86400,))
         if self.events_retention:
             self._db.execute("DELETE FROM events WHERE ts < ?", (now - self.events_retention,))
         self._db.commit()
@@ -240,6 +248,54 @@ class SQLiteStorage:
                 "INSERT INTO tasks (issue_key, category, tag, created_at, queue_key) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (issue_key, category, tag, self._now(), queue_key),
+            )
+            self._db.commit()
+
+    def window_snapshot(self, queue_key: str, window_sec: int) -> List[dict]:
+        """Что сейчас в окне дедупа: группировка задач по категории+тегу."""
+        with self._lock:
+            self._purge()
+            cutoff = self._now() - window_sec
+            rows = self._db.execute(
+                "SELECT category, COALESCE(tag, '') AS tag, COUNT(*) AS cnt, "
+                "       MIN(created_at) AS oldest, MAX(created_at) AS newest, "
+                "       GROUP_CONCAT(issue_key) AS keys "
+                "FROM tasks WHERE queue_key = ? AND created_at > ? "
+                "GROUP BY category, tag ORDER BY cnt DESC, category",
+                (queue_key, cutoff),
+            ).fetchall()
+        return [
+            {
+                "category": r["category"],
+                "tag": r["tag"] or None,
+                "count": r["cnt"],
+                "oldest_epoch": r["oldest"],
+                "newest_epoch": r["newest"],
+                "issue_keys": (r["keys"] or "").split(","),
+            }
+            for r in rows
+        ]
+
+    # --- кулдаун уведомлений (один алерт на категория+тег за окно) ---
+
+    def alert_on_cooldown(self, queue_key: str, category: str, tag: str, cooldown_sec: int) -> bool:
+        if cooldown_sec <= 0:
+            return False
+        with self._lock:
+            row = self._db.execute(
+                "SELECT alerted_at FROM alert_state "
+                "WHERE queue_key = ? AND category = ? AND tag = ?",
+                (queue_key, category, tag or ""),
+            ).fetchone()
+        return row is not None and row["alerted_at"] > self._now() - cooldown_sec
+
+    def mark_alerted(self, queue_key: str, category: str, tag: str, ts: float):
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO alert_state (queue_key, category, tag, alerted_at) "
+                "VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(queue_key, category, tag) DO UPDATE SET alerted_at = excluded.alerted_at",
+                (queue_key, category, tag or "", ts),
             )
             self._db.commit()
 
@@ -316,7 +372,7 @@ class SQLiteStorage:
     def clear(self, queue_key: str = None) -> int:
         with self._lock:
             n = 0
-            for t in ("seen", "tasks", "incoming_log", "duplicate_log", "events"):
+            for t in ("seen", "tasks", "incoming_log", "duplicate_log", "events", "alert_state"):
                 if queue_key:
                     n += self._db.execute(
                         f"SELECT COUNT(*) AS c FROM {t} WHERE queue_key = ?", (queue_key,)
@@ -523,13 +579,19 @@ class DuplicateChecker:
 
         dup_count = len(existing)
         dup_detected = False
+        alert_sent = False
 
         if dup_count >= threshold:
+            dup_detected = True
             first = existing[0]
             adjusted_first_dt = self.adjust_timezone(datetime.utcfromtimestamp(first["created_at"]))
 
+            cooldown_sec = max(0, int(queue.get("alert_cooldown_minutes") or 0)) * 60
+            on_cooldown = self.storage.alert_on_cooldown(qkey, category, tag, cooldown_sec)
+
             logger.warning(
                 f"🚨 [{qkey}] Дубль: '{category}' — {dup_count} совпадений (тег: '{tag_display}')"
+                + (f" — уведомление подавлено кулдауном {cooldown_sec // 60} мин" if on_cooldown else "")
             )
 
             tracker_url = self.config.get_str("tracker_url") or "https://tracker.yandex.ru"
@@ -547,23 +609,26 @@ class DuplicateChecker:
                 "detected_at": self.adjust_timezone(received_at).isoformat(),
                 "new_issue_url": new_issue_url,
                 "first_issue_url": first_issue_url,
+                "notified": not on_cooldown,
             }, qkey)
 
-            messenger = self.messenger_for(queue)
-            await messenger.send_duplicate_notification(
-                new_issue_key=payload.issue_key,
-                new_issue_url=new_issue_url,
-                category=category,
-                tag=tag,
-                duplicate_count=dup_count,
-                first_issue_key=first["issue_key"],
-                first_issue_url=first_issue_url,
-                first_created_at=adjusted_first_dt,
-                detected_at=self.adjust_timezone(received_at),
-                window_minutes=queue["window_minutes"],
-                queue_title=queue.get("title") or qkey,
-            )
-            dup_detected = True
+            if not on_cooldown:
+                messenger = self.messenger_for(queue)
+                await messenger.send_duplicate_notification(
+                    new_issue_key=payload.issue_key,
+                    new_issue_url=new_issue_url,
+                    category=category,
+                    tag=tag,
+                    duplicate_count=dup_count,
+                    first_issue_key=first["issue_key"],
+                    first_issue_url=first_issue_url,
+                    first_created_at=adjusted_first_dt,
+                    detected_at=self.adjust_timezone(received_at),
+                    window_minutes=queue["window_minutes"],
+                    queue_title=queue.get("title") or qkey,
+                )
+                self.storage.mark_alerted(qkey, category, tag, received_at.timestamp())
+                alert_sent = True
 
         try:
             self.storage.record_event(
@@ -588,6 +653,37 @@ class DuplicateChecker:
             "duplicates_found": dup_count,
             "threshold": threshold,
             "duplicate_detected": dup_detected,
+            "alert_sent": alert_sent,
+        }
+
+    def dry_run(self, payload: TrackerWebhookPayload, queue: dict) -> dict:
+        """Что произошло бы с этой задачей — без записи в БД и без уведомления.
+        Помогает при настройке триггера в Трекере (проверка полей category/tag)."""
+        qkey = queue["key"]
+        window_sec = int(queue["window_minutes"]) * 60
+        threshold = max(1, int(queue["threshold"]))
+        category = (payload.category or "").strip() or "Без категории"
+        tag = (payload.tag or "").strip()
+
+        already = self.storage.already_seen(payload.issue_key)
+        existing = self.storage.get_duplicates(qkey, category, tag or None, window_sec)
+        dup_count = len(existing)
+        cooldown_sec = max(0, int(queue.get("alert_cooldown_minutes") or 0)) * 60
+        on_cooldown = self.storage.alert_on_cooldown(qkey, category, tag, cooldown_sec)
+
+        return {
+            "dry_run": True,
+            "issue_key": payload.issue_key,
+            "queue": qkey,
+            "category": category,
+            "tag": tag,
+            "already_processed": already,
+            "would_record": not already,
+            "duplicates_in_window": dup_count,
+            "threshold": threshold,
+            "window_minutes": queue["window_minutes"],
+            "alert_on_cooldown": on_cooldown,
+            "would_alert": (not already) and dup_count >= threshold and not on_cooldown,
         }
 
 # ============================================================
@@ -619,7 +715,8 @@ from admin import build_admin_router
 app.include_router(build_admin_router(config, storage, checker, lambda: ADMIN_HTML))
 
 
-async def _handle_webhook(queue_key: str, payload: TrackerWebhookPayload, provided_token: Optional[str]):
+async def _handle_webhook(queue_key: str, payload: TrackerWebhookPayload,
+                          provided_token: Optional[str], dry_run: bool = False):
     queue = config.get_queue(queue_key)
     _check_webhook_token(queue, provided_token)
     if not queue:
@@ -628,21 +725,25 @@ async def _handle_webhook(queue_key: str, payload: TrackerWebhookPayload, provid
         raise HTTPException(status_code=403, detail=f"Очередь '{queue_key}' отключена")
     if not payload.issue_key:
         raise HTTPException(status_code=400, detail="Missing required field: issue_key")
+    if dry_run:
+        return {"status": "success", "data": checker.dry_run(payload, queue)}
     result = await checker.process_task(payload, queue)
     return {"status": "success", "data": result}
 
 
 @app.post("/webhook")
 async def tracker_webhook(payload: TrackerWebhookPayload,
+                          dry_run: bool = False,
                           x_webhook_token: Optional[str] = Header(default=None)):
     queue_key = (payload.queue or "").strip() or config.default_queue_key()
-    return await _handle_webhook(queue_key, payload, x_webhook_token)
+    return await _handle_webhook(queue_key, payload, x_webhook_token, dry_run)
 
 
 @app.post("/webhook/{queue_key}")
 async def tracker_webhook_queue(queue_key: str, payload: TrackerWebhookPayload,
+                                dry_run: bool = False,
                                 x_webhook_token: Optional[str] = Header(default=None)):
-    return await _handle_webhook(queue_key, payload, x_webhook_token)
+    return await _handle_webhook(queue_key, payload, x_webhook_token, dry_run)
 
 
 @app.get("/health")
@@ -676,6 +777,7 @@ async def stats():
             "enabled": q["enabled"],
             "window_minutes": q["window_minutes"],
             "threshold": q["threshold"],
+            "alert_cooldown_minutes": q["alert_cooldown_minutes"],
             "events_total": storage.count_events(q["key"]),
             "tasks_in_window": storage.tasks_in_window(q["key"], q["window_minutes"] * 60),
             "last_event_epoch": storage.last_event_ts(q["key"]),
@@ -687,6 +789,25 @@ async def stats():
         "events_retention_days": config.get_int("events_retention_days"),
         "queues": per_queue,
         "note": "total_* — журналы (ограничены max_log_entries); events_total — журнал аналитики без обрезки",
+    }
+
+
+@app.get("/api/v1/window", dependencies=[Depends(require_token)])
+async def window_state(queue: Optional[str] = None):
+    """Что сейчас в окне дедупа очереди: категории/теги со счётчиками и issue_key.
+    Отвечает на вопрос «почему сработало / почему нет»."""
+    qk = (queue or "").strip() or config.default_queue_key()
+    q = config.get_queue(qk)
+    if not q:
+        raise HTTPException(status_code=404, detail=f"Очередь '{qk}' не найдена")
+    groups = storage.window_snapshot(qk, q["window_minutes"] * 60)
+    return {
+        "queue": qk,
+        "window_minutes": q["window_minutes"],
+        "threshold": q["threshold"],
+        "alert_cooldown_minutes": q["alert_cooldown_minutes"],
+        "total_tasks": sum(g["count"] for g in groups),
+        "groups": groups,
     }
 
 
