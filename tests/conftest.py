@@ -36,8 +36,8 @@ def pytest_sessionfinish(session, exitstatus):
 
 @pytest.fixture(scope="session")
 def app_module():
-    import app
-    return app
+    import app.main as main
+    return main
 
 
 @pytest.fixture
@@ -71,7 +71,7 @@ def admin_client(client):
 @pytest.fixture
 def stack(tmp_path, app_module):
     """Изолированный ConfigStore + SQLiteStorage + DuplicateChecker на своём файле БД."""
-    from config_store import ConfigStore
+    from app.config_store import ConfigStore
     db = str(tmp_path / "stack.db")
     cfg = ConfigStore(db_path=db)
     storage = app_module.SQLiteStorage(cfg, db_path=db)

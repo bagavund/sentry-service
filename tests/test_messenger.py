@@ -3,7 +3,7 @@ from datetime import datetime
 
 import requests
 
-from yandex_messenger import YandexMessenger
+from app.messenger import YandexMessenger
 
 
 def test_disabled_without_credentials():

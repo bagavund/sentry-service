@@ -2,7 +2,7 @@ import logging
 
 import pytest
 
-from logging_setup import setup_logging, tail_log
+from app.logging_setup import setup_logging, tail_log
 
 
 @pytest.fixture(autouse=True)

@@ -19,8 +19,8 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from config_store import SECRET_KEYS, EDITABLE_KEYS, QUEUE_KEY_RE
-from logging_setup import tail_log, log_file_path, set_level
+from app.config_store import SECRET_KEYS, EDITABLE_KEYS, QUEUE_KEY_RE
+from app.logging_setup import tail_log, log_file_path, set_level
 
 logger = logging.getLogger("sentry.admin")
 

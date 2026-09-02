@@ -132,9 +132,6 @@ class ConfigStore:
                 continue
         return 0
 
-    def get_bool(self, key: str) -> bool:
-        return self.get_str(key).strip().lower() in ("1", "true", "yes", "on")
-
     def set(self, key: str, value) -> None:
         value = "" if value is None else str(value)
         with self._lock:

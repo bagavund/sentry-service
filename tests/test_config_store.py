@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from config_store import ConfigStore
+from app.config_store import ConfigStore
 
 
 @pytest.fixture
@@ -20,13 +20,6 @@ def test_get_int_falls_back_to_default(cfg):
     assert cfg.get_int("timezone_offset") == 3
     cfg.set("timezone_offset", "not-a-number")
     assert cfg.get_int("timezone_offset") == 3
-
-
-def test_get_bool(cfg):
-    cfg.set("flag", "yes")
-    assert cfg.get_bool("flag") is True
-    cfg.set("flag", "0")
-    assert cfg.get_bool("flag") is False
 
 
 def test_secrets_never_leak_values(cfg):

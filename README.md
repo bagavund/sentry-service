@@ -225,7 +225,7 @@ docker compose up -d --build
   замком — несколько воркеров/реплик нельзя. `docker-compose.yml` — один контейнер.
 - **Бэкап.** `docker compose cp sentry:/app/data/sentry.db ./backup.db`
   (там же лежит `sentry.log`).
-- **Содержимое БД:** `docker compose exec sentry python db_inspect.py`
+- **Содержимое БД:** `docker compose exec sentry python tools/db_inspect.py`
   (печатает `settings`, `queues` и рабочие таблицы).
 - **Логи** контейнера: `docker compose logs -f`; файл: `/app/data/sentry.log`
   или вкладка «Логи» в админке.
@@ -236,13 +236,33 @@ docker compose up -d --build
 
 ---
 
+## Структура
+
+```text
+app/                 пакет приложения
+  main.py            FastAPI: маршруты, токены, запуск (uvicorn app.main:app)
+  storage.py         SQLiteStorage — состояние, журналы, аналитика
+  checker.py         DuplicateChecker, TrackerWebhookPayload — бизнес-логика
+  config_store.py    ConfigStore — настройки и очереди (таблицы settings, queues)
+  admin.py           роутер /admin и /admin/api/*
+  messenger.py       YandexMessenger — отправка уведомлений
+  logging_setup.py   консоль + ротируемый файл лога
+web/                 самодостаточные HTML-страницы (dashboard.html, admin.html)
+tools/               db_inspect.py — просмотр содержимого БД (вне рантайма)
+tests/               pytest-набор
+docs/                системный анализ
+data/                локальный том: sentry.db, sentry.log (в .gitignore)
+```
+
+---
+
 ## Локальный запуск без Docker
 
 ```bash
 python -m venv .venv
 . .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python app.py                   # :8000 с автоперезагрузкой
+python -m app.main              # :8000 с автоперезагрузкой (или: make run)
 ```
 
 ---

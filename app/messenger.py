@@ -1,40 +1,39 @@
 """
 Отправка уведомлений в Яндекс Мессенджер (внутренний бот AV).
 
-API: POST {YANDEX_MESSENGER_URL}
+API: POST {url}
 Тело: {"chat_id": "...", "text": "..."}
 Заголовки: Content-Type: application/json, Authorization: Bearer <token>
 
 Мессенджер принимает только простой текст — разметки (HTML/Markdown) нет,
 ссылки вставляются как есть, отдельной строкой.
+
+Токен, chat_id и URL передаёт вызывающий (обычно `DuplicateChecker.messenger_for`,
+который берёт их из `ConfigStore`). Пустой токен или chat_id → `enabled = False`,
+сообщения только пишутся в лог.
 """
 
-import os
 import logging
-import requests
+import os
 from datetime import datetime
+
+import requests
 
 logger = logging.getLogger(__name__)
 
-# ============================================================
-# КОНФИГУРАЦИЯ
-# ============================================================
-
-YANDEX_MESSENGER_URL     = os.getenv("YANDEX_MESSENGER_URL", "https://ymnb.av.ru/api/messages/send")
-YANDEX_MESSENGER_TOKEN   = os.getenv("YANDEX_MESSENGER_TOKEN", "").strip()
-YANDEX_MESSENGER_CHAT_ID = os.getenv("YANDEX_MESSENGER_CHAT_ID", "").strip()
+DEFAULT_MESSENGER_URL = os.getenv("YANDEX_MESSENGER_URL", "https://ymnb.av.ru/api/messages/send")
 
 
 class YandexMessenger:
-    def __init__(self, token: str = None, chat_id: str = None, url: str = None):
-        self.token = (token if token is not None else YANDEX_MESSENGER_TOKEN)
-        self.chat_id = (chat_id if chat_id is not None else YANDEX_MESSENGER_CHAT_ID)
-        self.url = url or YANDEX_MESSENGER_URL
+    def __init__(self, token: str, chat_id: str, url: str = None):
+        self.token = token or ""
+        self.chat_id = chat_id or ""
+        self.url = url or DEFAULT_MESSENGER_URL
 
         self.enabled = bool(self.token and self.chat_id)
 
         if not self.enabled:
-            logger.warning("⚠️ Яндекс Мессенджер не настроен (нет YANDEX_MESSENGER_TOKEN / CHAT_ID). Уведомления только в консоль.")
+            logger.warning("⚠️ Яндекс Мессенджер не настроен (нет токена / chat_id). Уведомления только в консоль.")
         else:
             logger.info(f"✅ Яндекс Мессенджер инициализирован для чата: {self.chat_id}")
 
@@ -85,10 +84,9 @@ class YandexMessenger:
         first_issue_url: str,
         first_created_at: datetime,
         detected_at: datetime,
-        window_minutes=None,
+        window_minutes,
         queue_title: str = None,
     ) -> bool:
-        window = window_minutes if window_minutes is not None else os.getenv("WINDOW_MINUTES", "30")
         queue_line = f"📂 Очередь: {queue_title}\n" if queue_title else ""
         message = (
             "⚠️ ОБНАРУЖЕНО ПОВТОРЕНИЕ КАТЕГОРИИ\n\n"
@@ -97,7 +95,7 @@ class YandexMessenger:
             f"🏷 Тег: {tag or 'Не указан'}\n\n"
             f"🆕 Новая задача: {new_issue_key}\n"
             f"{new_issue_url}\n"
-            f"🔁 Совпадений за {window} мин: {duplicate_count}\n\n"
+            f"🔁 Совпадений за {window_minutes} мин: {duplicate_count}\n\n"
             f"📅 Первая задача: {first_issue_key}\n"
             f"{first_issue_url}\n"
             f"🕒 Создана: {first_created_at.strftime('%d.%m.%Y %H:%M:%S')}\n\n"
@@ -113,13 +111,5 @@ class YandexMessenger:
             f"📌 Чат: {self.chat_id}\n"
             f"📅 Время: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
             "ℹ️ Уведомления о дубликатах будут приходить сюда."
-        )
-        return await self.send_message(message)
-
-    async def send_error_message(self, error_text: str) -> bool:
-        message = (
-            "❌ ОШИБКА В СЕРВИСЕ\n\n"
-            f"{error_text}\n\n"
-            f"⏰ Время: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
         )
         return await self.send_message(message)

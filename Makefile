@@ -1,6 +1,6 @@
 # Sentry — короткие команды. Требуется Docker с плагином compose.
 
-.PHONY: up down restart rebuild logs ps token
+.PHONY: up down restart rebuild logs ps token test run
 
 ## запустить (собрать при необходимости) в фоне
 up:
@@ -29,3 +29,11 @@ ps:
 ## сгенерировать значение для WEBHOOK_TOKEN
 token:
 	@python -c "import secrets; print(secrets.token_urlsafe(32))"
+
+## прогнать автотесты
+test:
+	pytest
+
+## локальный запуск без Docker (с автоперезагрузкой)
+run:
+	python -m app.main
